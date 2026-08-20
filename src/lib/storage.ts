@@ -1,8 +1,11 @@
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import type { StoredResult } from './types';
 
-// Bumped to v2 when `digests` was renamed to `bodyDigests` (DESIGN.md section 5).
-const PREFIX = 'tldr:v2:';
+// Bump this whenever the stored shape or the rendered output changes, so
+// existing entries regenerate instead of serving a stale format.
+//   v2: `digests` renamed to `bodyDigests` (DESIGN.md section 5)
+//   v3: issue references in the summary are rendered as links
+const PREFIX = 'tldr:v3:';
 /** Cached summaries expire after a week even if nobody refreshes them. */
 const TTL_SECONDS = 60 * 60 * 24 * 7;
 

@@ -24,6 +24,7 @@ care about the "why".
 | Fault isolation so one bad batch cannot abort a run | [`client.ts`](src/lib/llm/client.ts) |
 | Change-detection cache for cheap repeat runs | [`updater.ts`](src/lib/updater.ts) |
 | Treating model output as untrusted input | [`markdown.ts`](src/lib/markdown.ts) |
+| Source-linking issue refs without storing URLs | [`markdown.ts`](src/lib/markdown.ts) |
 
 A deliberate framing from DESIGN.md: this is a **workflow, not an autonomous
 agent**. The path is fixed at design time. No model decides what to do next.
@@ -212,6 +213,12 @@ application code) or add GitHub OAuth sign-in.
 
 ## Notes
 
+- **Issue references link to their source.** Every `#1234` in the briefing
+  becomes a link to that issue on GitHub, in both the HTML and the Markdown
+  download. The URL is derived from the repo reference and the issue number at
+  compose time, so nothing extra is stored and no model tokens are spent on it.
+  Only numbers that appear in the digests are linked, so an invented number
+  cannot become a plausible-looking source link.
 - **Output is sanitised.** The composer's Markdown derives from arbitrary
   GitHub issue text, so an issue titled `<img src=x onerror=...>` can reach the
   summary. [`src/lib/markdown.ts`](src/lib/markdown.ts) escapes raw HTML,

@@ -6,7 +6,7 @@
  * exercised here, because those need live credentials and cost money.
  */
 import { mintToken, verifyToken } from '../src/lib/auth.ts';
-import { renderMarkdown } from '../src/lib/markdown.ts';
+import { linkIssueRefs, renderMarkdown } from '../src/lib/markdown.ts';
 import { parseRepoInput } from '../src/lib/repo-url.ts';
 import { batch, runBatches } from '../src/lib/llm/batching.ts';
 import { checkUpdates, mergeDigests, pruneClosed } from '../src/lib/updater.ts';
@@ -175,6 +175,37 @@ group('batch fault isolation');
 
   const allOk = await runBatches(groups, async (g) => g);
   ok('no failures on happy path', allOk.failed.length === 0 && allOk.results.length === 6, allOk);
+}
+
+// ------------------------------------------------------ issue ref linking
+group('issue reference linking');
+{
+  const repo = { owner: 'lukeed', repo: 'clsx' };
+  const known = new Set([112, 97, 52]);
+  const link = (n: number) => `https://github.com/lukeed/clsx/issues/${n}`;
+  const L = (md: string) => linkIssueRefs(md, repo, known);
+
+  ok('links a known issue', L('See #112 for detail') === `See [#112](${link(112)}) for detail`, L('See #112 for detail'));
+  ok('links several in a list',
+    L('Issues: #112, #97, #52') === `Issues: [#112](${link(112)}), [#97](${link(97)}), [#52](${link(52)})`,
+    L('Issues: #112, #97, #52'));
+  ok('leaves unknown numbers alone', L('See #999') === 'See #999', L('See #999'));
+  ok('does not link a hex colour', L('colour #112233 here') === 'colour #112233 here', L('colour #112233 here'));
+  ok('leaves inline code alone', L('use `#112` literally') === 'use `#112` literally', L('use `#112` literally'));
+  ok('leaves fenced code alone',
+    L('```\n#112\n```') === '```\n#112\n```', L('```\n#112\n```'));
+  ok('does not double-link an existing link',
+    L(`[#112](${link(112)})`) === `[#112](${link(112)})`, L(`[#112](${link(112)})`));
+  ok('works at the start of a string', L('#97 opens') === `[#97](${link(97)}) opens`, L('#97 opens'));
+  ok('survives bold markers', L('**#52** matters') === `**[#52](${link(52)})** matters`, L('**#52** matters'));
+  ok('adjacent refs both link',
+    L('#112,#97') === `[#112](${link(112)}),[#97](${link(97)})`, L('#112,#97'));
+  ok('no known numbers is a no-op',
+    linkIssueRefs('See #112', repo, new Set()) === 'See #112');
+
+  // End to end: the linked Markdown must render as a real anchor.
+  const html = renderMarkdown(L('Issues: #112'));
+  ok('renders as an anchor', html.includes(`href="${link(112)}"`) && html.includes('rel="noopener noreferrer nofollow"'), html);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

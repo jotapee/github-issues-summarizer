@@ -56,3 +56,43 @@ marked.use({
 export function renderMarkdown(markdown: string): string {
   return marked.parse(markdown, { async: false }) as string;
 }
+
+/**
+ * Turns issue references such as `#1234` into links to the issue on GitHub.
+ *
+ * Nothing extra is stored to make this work: the URL is derived from the repo
+ * reference already held on the record plus the issue number in the text.
+ *
+ * Only numbers present in `knownNumbers` are linked. That keeps the composer
+ * honest (a number it invented cannot become a plausible-looking link) and
+ * avoids false positives such as a hex colour like `#112233`.
+ *
+ * Text inside code spans and fenced blocks is left alone, as is any reference
+ * the composer already wrote as a Markdown link.
+ */
+export function linkIssueRefs(
+  markdown: string,
+  repo: { owner: string; repo: string },
+  knownNumbers: ReadonlySet<number>,
+): string {
+  if (!knownNumbers.size) return markdown;
+
+  // Keep fenced blocks and inline code verbatim by splitting on them.
+  const segments = markdown.split(/(```[\s\S]*?```|`[^`\n]*`)/g);
+
+  return segments
+    .map((segment, index) => {
+      // Odd indices are the captured code segments.
+      if (index % 2 === 1) return segment;
+
+      return segment.replace(/(.?)#(\d+)\b/g, (match, before: string, digits: string) => {
+        const number = Number(digits);
+        if (!knownNumbers.has(number)) return match;
+        // Already inside a Markdown link label, e.g. [#12](...).
+        if (before === '[') return match;
+        const url = `https://github.com/${repo.owner}/${repo.repo}/issues/${number}`;
+        return `${before}[#${number}](${url})`;
+      });
+    })
+    .join('');
+}

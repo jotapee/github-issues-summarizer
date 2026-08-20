@@ -1,4 +1,4 @@
-import { renderMarkdown } from '../markdown';
+import { linkIssueRefs, renderMarkdown } from '../markdown';
 import type {
   CommentDigest,
   Issue,
@@ -109,7 +109,11 @@ ${renderInput(usable, commentDigests)}`,
   if (!body) throw new Error('The composer returned an empty summary.');
   if (!usable.length) throw new Error('No issues could be summarised.');
 
-  const markdown = header(ref, meta, issues.length) + body;
+  // Issue references become links to the source. Derived from `ref` plus the
+  // number, so nothing extra needs storing, and restricted to issues we
+  // actually digested so an invented number cannot become a link.
+  const known = new Set(usable.map((d) => d.number));
+  const markdown = header(ref, meta, issues.length) + linkIssueRefs(body, ref, known);
   const html = renderMarkdown(markdown);
 
   return { markdown, html };

@@ -205,6 +205,15 @@ model calls.
 - **Change-detection cache (KV, 7-day TTL).** Re-summarize only what moved;
   drop digests for closed issues. Without this, every run pays full price.
 
+- **Issue references are links, and cost nothing to store.** Every `#1234` in
+  the briefing is rendered as a link to the issue on GitHub. The URL is derived
+  at compose time from the repo reference already on the record plus the issue
+  number, so no URL is persisted, no extra field is added to the stored shape,
+  and no model tokens are spent producing them. Only numbers present in the
+  digests are linked, which means a number the composer invented cannot be
+  dressed up as a working source link. Code spans and fenced blocks are left
+  alone.
+
 - **Output sanitization.** The composer's Markdown derives from arbitrary
   GitHub text, so an issue titled `<img src=x onerror=…>` can reach the
   summary. The renderer escapes raw HTML, restricts link schemes to
