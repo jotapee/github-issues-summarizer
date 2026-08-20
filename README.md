@@ -1,14 +1,19 @@
 # GitHub Issues Summarizer
 
-Paste a public GitHub repository URL and find out whether anyone is actually
-looking after it. You get a **maintenance health score** out of 100 and a
-short, source-anchored briefing that justifies it: the dominant themes, what
-needs attention, and what nobody has answered yet.
+Paste a public GitHub repository URL and get its open issues summarised into a
+single page: the themes that dominate the tracker, what needs attention, what
+nobody has answered, and an **overall status score** for the repository.
 
-The score measures *maintenance*, not code quality. An issue tracker shows
-whether maintainers respond and resolve; it cannot see the source. A dormant
-project with excellent code and a quiet tracker scores badly here, which is the
-correct answer to "is this dependency being looked after".
+The briefing is the substance; the score is there so you can take in the
+overall state at a glance. Every claim is anchored to real issue numbers, which
+link back to their source.
+
+A note on what the score can and cannot see. It reads the issue tracker, so it
+measures *maintenance*: whether issues get resolved, whether the backlog moves,
+whether reporters get replies. It cannot see the source, so it is not a
+judgement of code quality. A dormant project with excellent code and a quiet
+tracker scores low, which is the right answer to "is this being looked after"
+and the wrong answer to "is this well written".
 
 This is a worked example of **multi-stage LLM orchestration**. The interesting
 part is not the summarising, it is the control flow around it: a deterministic

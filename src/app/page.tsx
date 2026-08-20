@@ -17,17 +17,18 @@ export default async function Home() {
     <main className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-5 py-12 sm:px-8 sm:py-20">
       <header className="mb-10">
         <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-ink-400">
-          Repository health check
+          GitHub repository summary
         </p>
         <h1 className="text-4xl font-bold leading-[1.1] tracking-tight text-white sm:text-5xl">
-          Is this project
+          Every open issue,
           <br />
-          <span className="text-accent">actually maintained?</span>
+          <span className="text-accent">summarised in one page.</span>
         </h1>
         <p className="mt-5 max-w-xl text-base leading-relaxed text-ink-400">
-          Paste any public GitHub repository. Its open issues and comment threads are read,
-          verified and scored, so you can tell in one screen whether a dependency is looked
-          after: how much gets resolved, what is rotting, and what you would be walking into.
+          Paste any public GitHub repository. Its open issues and comment threads are read
+          and condensed into a single briefing: the themes that dominate the tracker, what
+          needs attention, what nobody has answered, and an overall status score for the
+          repository.
         </p>
       </header>
 

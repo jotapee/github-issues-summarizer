@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Repo Health Check: is this project maintained?',
+  title: 'GitHub Issue Summary: a repository at a glance',
   description:
-    'Paste a GitHub repository URL to get a maintenance health score and a short briefing on what its open issues actually say.',
+    'Paste a GitHub repository URL to get its open issues summarised into themes, what needs attention and what is unanswered, plus an overall status score.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -17,7 +17,7 @@ function download(filename: string, contents: string, mime: string) {
 
 /** Wraps the fragment the composer produced into a standalone HTML document. */
 function standaloneHtml(result: StoredResult): string {
-  const title = `${result.ref.owner}/${result.ref.repo} health check`;
+  const title = `${result.ref.owner}/${result.ref.repo} issue summary`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -65,7 +65,7 @@ export default function SummaryView({
   cached: boolean;
 }) {
   const [copied, setCopied] = useState(false);
-  const base = `${result.ref.owner}-${result.ref.repo}-health`;
+  const base = `${result.ref.owner}-${result.ref.repo}-issues`;
 
   const copy = useCallback(async () => {
     try {

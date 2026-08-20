@@ -113,8 +113,13 @@ group('api tokens');
   const extended = await verifyToken(`v1.99999999999999.${sig}`, secret, host);
   ok('extending expiry breaks signature', !extended.ok && extended.reason === 'bad-signature');
 
-  const flipped = await verifyToken(`v1.${exp}.${'X'}${sig.slice(1)}`, secret, host);
-  ok('flipped signature rejected', !flipped.ok && flipped.reason === 'bad-signature');
+  // Pick a replacement character that cannot equal the original, otherwise the
+  // "corrupted" signature is occasionally identical to the real one and the
+  // test passes a valid token. That flaked at roughly 1 in 64 runs.
+  const swapped = sig[0] === 'A' ? 'B' : 'A';
+  ok('test corrupts the signature for real', swapped !== sig[0]);
+  const flipped = await verifyToken(`v1.${exp}.${swapped}${sig.slice(1)}`, secret, host);
+  ok('flipped signature rejected', !flipped.ok && flipped.reason === 'bad-signature', flipped);
 
   // An already-expired token, signed correctly.
   const past = Date.now() - 1000;

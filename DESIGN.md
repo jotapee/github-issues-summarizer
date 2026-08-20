@@ -11,19 +11,20 @@ implementation and updated when a decision changes during the build.
 
 ## 1. Objective
 
-Answer one question about a repository you are thinking of depending on: **is
-anyone actually looking after this, and what am I walking into?**
+Summarise a repository's issue tracker, and report its overall status.
 
-The tool reads an open issue tracker (up to 100 issues plus their comment
-threads) and returns two things: a **maintenance health score** and a short
-briefing that justifies it. The score makes the answer scannable; the briefing
-makes it checkable.
+The tool reads up to 100 open issues with their comment threads and returns two
+things: a **briefing** that condenses them into themes, what needs attention and
+what is unanswered, and an **overall status score** for the repository. The
+briefing is the substance; the score exists so the overall state can be taken in
+at a glance. Both are anchored to real issue numbers.
 
 **What the score does and does not claim.** It measures *maintenance*: whether
 issues get resolved, whether the backlog is being worked, whether reporters get
 replies. It cannot see the source, so it is not a judgement of code quality. A
 dormant project with well-written code and a quiet tracker scores badly here,
-and that is the correct answer to the question being asked.
+which is the right answer to "is this being looked after" and the wrong answer
+to "is this well written". The output labels the score accordingly.
 
 "Trustworthy" is a hard requirement, not a nice-to-have: the summary must be
 anchored to real issue numbers and must not invent problems, and the score must
