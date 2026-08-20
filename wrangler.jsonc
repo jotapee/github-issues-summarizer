@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tldr-gen",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-03-25",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": { "enabled": true },
+
+  // Storage for GH repo snapshots and generated output.
+  // Create with: npx wrangler kv namespace create TLDR_KV
+  // then paste the returned id below.
+  "kv_namespaces": [
+    {
+      "binding": "TLDR_KV",
+      "id": "PLACEHOLDER_REPLACE_WITH_YOUR_KV_ID"
+    }
+  ]
+
+  // Secrets (never put these here; they are set out of band):
+  //   npx wrangler secret put GITHUB_TOKEN
+  //   npx wrangler secret put OPENAI_API_KEY
+}

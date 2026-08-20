@@ -1,0 +1,15 @@
+# Copy to .dev.vars for local development (wrangler + next dev read this).
+# NEVER put real values in this file. It is committed. Real values go in
+# .dev.vars, which is gitignored.
+
+# GitHub: a classic or fine-grained PAT with public repo read access.
+# Only `public_repo` scope is needed to summarise public repositories.
+GITHUB_TOKEN=ghp_your_token_here
+
+# OpenAI: https://platform.openai.com/api-keys
+OPENAI_API_KEY=sk-your_key_here
+
+# Signing key for the short-lived API tokens the page mints.
+# Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+# Rotate to invalidate every outstanding token immediately.
+AUTH_SECRET=generate_me

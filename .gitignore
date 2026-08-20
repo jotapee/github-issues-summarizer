@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.open-next/
+.wrangler/
+.env*
+!.env.example
+.dev.vars
+next-env.d.ts
+*.tsbuildinfo
+.DS_Store
+
+# Local scratch notes, not part of the published example.
+# Delete this line if you want them in the repo.
+MERMAID-PLAYGROUND.md
