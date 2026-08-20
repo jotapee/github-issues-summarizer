@@ -17,7 +17,7 @@ function download(filename: string, contents: string, mime: string) {
 
 /** Wraps the fragment the composer produced into a standalone HTML document. */
 function standaloneHtml(result: StoredResult): string {
-  const title = `${result.ref.owner}/${result.ref.repo} Issue TL;DR`;
+  const title = `${result.ref.owner}/${result.ref.repo} health check`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -48,6 +48,15 @@ ${result.summary.html}
 </html>`;
 }
 
+/** Red through amber to green, matching the grade bands in src/lib/health.ts. */
+function gradeColour(score: number): string {
+  if (score >= 85) return '#4ade80';
+  if (score >= 70) return '#a3e635';
+  if (score >= 55) return '#facc15';
+  if (score >= 40) return '#fb923c';
+  return '#f87171';
+}
+
 export default function SummaryView({
   result,
   cached,
@@ -56,7 +65,7 @@ export default function SummaryView({
   cached: boolean;
 }) {
   const [copied, setCopied] = useState(false);
-  const base = `${result.ref.owner}-${result.ref.repo}-tldr`;
+  const base = `${result.ref.owner}-${result.ref.repo}-health`;
 
   const copy = useCallback(async () => {
     try {
@@ -70,6 +79,48 @@ export default function SummaryView({
 
   return (
     <section className="flex flex-col gap-5">
+      <div className="flex flex-col gap-4 rounded-2xl border border-ink-700 bg-ink-900/60 p-6 sm:flex-row sm:items-center sm:gap-6">
+        <div
+          className="flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-xl border"
+          style={{ borderColor: gradeColour(result.health.score), color: gradeColour(result.health.score) }}
+        >
+          <span className="text-2xl font-bold leading-none">{result.health.score}</span>
+          <span className="mt-1 text-[11px] font-semibold uppercase tracking-wider opacity-80">
+            grade {result.health.grade}
+          </span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-white">Maintenance health</p>
+          <p className="mt-1 text-xs leading-relaxed text-ink-400">
+            How well the issue tracker is looked after. It does not measure the quality of
+            the source code.
+          </p>
+          <dl className="mt-3 flex flex-col gap-1.5">
+            {result.health.components.map((c) => (
+              <div key={c.key} className="flex items-center gap-3 text-xs">
+                <dt className="w-52 shrink-0 truncate text-ink-400" title={c.detail}>
+                  {c.label}
+                </dt>
+                <dd className="flex flex-1 items-center gap-2">
+                  <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink-800">
+                    <span
+                      className="block h-full rounded-full"
+                      style={{
+                        width: `${Math.round((c.earned / c.max) * 100)}%`,
+                        background: gradeColour(result.health.score),
+                      }}
+                    />
+                  </span>
+                  <span className="w-14 shrink-0 text-right tabular-nums text-ink-400">
+                    {c.earned}/{c.max}
+                  </span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={copy}

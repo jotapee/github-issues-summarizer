@@ -1,4 +1,5 @@
 import { MAX_ISSUES, RepoNotFoundError, fetchRepoSnapshot } from './github';
+import { scoreHealth } from './health';
 import { checkCoherence, feedbackFor } from './llm/l3-coherence';
 import { composeSummary } from './llm/l4-composer';
 import { summariseIssues } from './llm/l1-issues';
@@ -133,6 +134,15 @@ async function build(
   emit: Emit,
   delta?: UpdateDelta,
 ): Promise<StoredResult> {
+  // Scored in code before the composer runs, so the model explains a number
+  // it cannot change (DESIGN.md section 7).
+  const health = scoreHealth(snapshot.meta, snapshot.issues, bodyDigests);
+  emit({
+    type: 'stage',
+    stage: 'score',
+    detail: `Maintenance health scored ${health.score}/100 (${health.grade}).`,
+  });
+
   emit({ type: 'stage', stage: 'compose', detail: 'Composing the TL;DR…' });
 
   const summary = await composeSummary(
@@ -142,6 +152,7 @@ async function build(
     snapshot.issues,
     bodyDigests,
     commentDigests,
+    health,
     delta,
   );
 
@@ -152,6 +163,7 @@ async function build(
     generatedAt: new Date().toISOString(),
     lastSyncedAt: snapshot.fetchedAt,
     issueCount: snapshot.issues.length,
+    health,
     bodyDigests,
     commentDigests,
     summary,

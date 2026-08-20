@@ -12,7 +12,13 @@ export interface RepoMeta {
   description: string | null;
   stars: number;
   language: string | null;
+  /** Last push to any branch. A dormancy signal for the health score. */
+  pushedAt: string;
   openIssueCount: number;
+  closedIssueCount: number;
+  /** Issues closed within the trailing window, i.e. recent throughput. */
+  closedInWindow: number;
+  windowDays: number;
 }
 
 export interface IssueComment {
@@ -85,6 +91,29 @@ export interface UpdateDelta {
   narrative: string;
 }
 
+/** One scored dimension of maintenance health. */
+export interface HealthComponent {
+  key: string;
+  label: string;
+  earned: number;
+  max: number;
+  /** Plain-language statement of the numbers behind this component. */
+  detail: string;
+}
+
+/**
+ * Computed in code, never by a model, so the same repository always scores the
+ * same and every point is traceable. See src/lib/health.ts.
+ */
+export interface HealthScore {
+  /** 0 to 100. */
+  score: number;
+  grade: string;
+  components: HealthComponent[];
+  /** Limits the reader needs in order to interpret the number honestly. */
+  caveats: string[];
+}
+
 export interface Summary {
   markdown: string;
   html: string;
@@ -99,6 +128,7 @@ export interface StoredResult {
   /** ISO timestamp used as the `since` cursor on the next Updater run. */
   lastSyncedAt: string;
   issueCount: number;
+  health: HealthScore;
   bodyDigests: IssueDigest[];
   commentDigests: CommentDigest[];
   summary: Summary;

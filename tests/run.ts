@@ -6,9 +6,10 @@
  * exercised here, because those need live credentials and cost money.
  */
 import { mintToken, verifyToken } from '../src/lib/auth.ts';
-import { linkIssueRefs, renderMarkdown } from '../src/lib/markdown.ts';
+import { linkIssueRefs, renderMarkdown, stripEmDashes } from '../src/lib/markdown.ts';
 import { parseRepoInput } from '../src/lib/repo-url.ts';
 import { batch, runBatches } from '../src/lib/llm/batching.ts';
+import { gradeFor, scoreHealth } from '../src/lib/health.ts';
 import { checkUpdates, mergeDigests, pruneClosed } from '../src/lib/updater.ts';
 import type { StoredResult } from '../src/lib/types.ts';
 
@@ -206,6 +207,96 @@ group('issue reference linking');
   // End to end: the linked Markdown must render as a real anchor.
   const html = renderMarkdown(L('Issues: #112'));
   ok('renders as an anchor', html.includes(`href="${link(112)}"`) && html.includes('rel="noopener noreferrer nofollow"'), html);
+}
+
+// --------------------------------------------------------- house style
+group('em dash enforcement');
+{
+  const EM = '\u2014';
+  ok('spaced em dash becomes a comma',
+    stripEmDashes(`activity ${EM} no changes`) === 'activity, no changes',
+    stripEmDashes(`activity ${EM} no changes`));
+  ok('unspaced em dash becomes a comma',
+    stripEmDashes(`activity${EM}no changes`) === 'activity, no changes',
+    stripEmDashes(`activity${EM}no changes`));
+  ok('horizontal bar handled too',
+    stripEmDashes(`a \u2015 b`) === 'a, b', stripEmDashes(`a \u2015 b`));
+  ok('leaves hyphens alone', stripEmDashes('well-written code') === 'well-written code');
+  ok('leaves en dash ranges alone', stripEmDashes('1\u20133 minutes') === '1\u20133 minutes');
+  ok('leaves clean text untouched', stripEmDashes('nothing to do here') === 'nothing to do here');
+  ok('handles several in one string',
+    stripEmDashes(`a ${EM} b ${EM} c`) === 'a, b, c', stripEmDashes(`a ${EM} b ${EM} c`));
+}
+
+// ------------------------------------------------------------ health score
+group('maintenance health score');
+{
+  const NOW = Date.parse('2026-08-20T00:00:00Z');
+  const daysAgo = (n: number) => new Date(NOW - n * 86400000).toISOString();
+
+  const meta = (over: Partial<Parameters<typeof scoreHealth>[0]> = {}) => ({
+    description: null, stars: 0, language: null,
+    pushedAt: daysAgo(5),
+    openIssueCount: 50, closedIssueCount: 950, closedInWindow: 40, windowDays: 90,
+    ...over,
+  }) as Parameters<typeof scoreHealth>[0];
+
+  const mkIssues = (n: number, over: Partial<{ updatedAt: string; commentCount: number }> = {}) =>
+    Array.from({ length: n }, (_, i) => ({
+      number: i + 1, title: 't', body: '', url: '', author: 'a', labels: [],
+      createdAt: daysAgo(400), updatedAt: daysAgo(10), commentCount: 3, comments: [],
+      ...over,
+    })) as Parameters<typeof scoreHealth>[1];
+
+  const mkDigests = (n: number, high = 0) =>
+    Array.from({ length: n }, (_, i) => ({
+      number: i + 1, gist: 'g', theme: 't',
+      kind: i < high ? 'bug' : 'feature',
+      severity: i < high ? 'high' : 'low',
+    })) as Parameters<typeof scoreHealth>[2];
+
+  ok('grade bands', ['A','B','C','D','F'].join() === [gradeFor(90), gradeFor(75), gradeFor(60), gradeFor(45), gradeFor(10)].join());
+
+  const healthy = scoreHealth(meta(), mkIssues(50), mkDigests(50), NOW);
+  ok('well-run repo scores high', healthy.score >= 80, healthy.score);
+  ok('components sum to the score',
+    Math.abs(healthy.components.reduce((s, c) => s + c.earned, 0) - healthy.score) <= 0.5, healthy);
+  ok('score never exceeds 100', healthy.score <= 100, healthy.score);
+
+  // The case that motivated deterministic scoring: a small, quiet, dormant
+  // tracker must NOT beat a large, busy, actively worked one.
+  const dormant = scoreHealth(
+    meta({ openIssueCount: 16, closedIssueCount: 99, closedInWindow: 0, pushedAt: daysAgo(900) }),
+    mkIssues(16, { updatedAt: daysAgo(900), commentCount: 0 }),
+    mkDigests(16), NOW,
+  );
+  const busy = scoreHealth(
+    meta({ openIssueCount: 822, closedIssueCount: 13801, closedInWindow: 163, pushedAt: daysAgo(1) }),
+    mkIssues(100), mkDigests(100), NOW,
+  );
+  ok('a busy maintained repo beats a small dormant one', busy.score > dormant.score, { busy: busy.score, dormant: dormant.score });
+  ok('dormant repo scores poorly', dormant.score < 45, dormant.score);
+
+  // Determinism is the whole point of not letting a model do this.
+  const a = scoreHealth(meta(), mkIssues(50), mkDigests(50), NOW);
+  const b = scoreHealth(meta(), mkIssues(50), mkDigests(50), NOW);
+  ok('scoring is deterministic', a.score === b.score && JSON.stringify(a) === JSON.stringify(b));
+
+  const severe = scoreHealth(meta(), mkIssues(50), mkDigests(50, 50), NOW);
+  ok('all-high-severity backlog loses the severity points',
+    severe.components.find((c) => c.key === 'severity')!.earned === 0, severe.components);
+
+  const empty = scoreHealth(
+    meta({ openIssueCount: 0, closedIssueCount: 0, closedInWindow: 0 }), [], [], NOW);
+  ok('empty tracker does not crash or NaN', Number.isFinite(empty.score), empty);
+  ok('small sample is flagged', empty.caveats.some((c) => c.includes('not statistically meaningful')), empty.caveats);
+  ok('always caveats that it is not code quality',
+    healthy.caveats.some((c) => c.includes('quality of the source code')), healthy.caveats);
+
+  const failedOnly = scoreHealth(meta(), mkIssues(2), [
+    { number: 1, gist: '', theme: '', kind: 'other', severity: 'high', failed: true },
+  ] as Parameters<typeof scoreHealth>[2], NOW);
+  ok('failed digests excluded from severity', Number.isFinite(failedOnly.score), failedOnly.score);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

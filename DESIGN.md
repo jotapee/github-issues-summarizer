@@ -11,13 +11,24 @@ implementation and updated when a decision changes during the build.
 
 ## 1. Objective
 
-Turn an open issue tracker (up to 100 issues plus their comment threads) into
-one short, trustworthy briefing, so a maintainer or newcomer can understand the
-state of a repo without reading every thread.
+Answer one question about a repository you are thinking of depending on: **is
+anyone actually looking after this, and what am I walking into?**
+
+The tool reads an open issue tracker (up to 100 issues plus their comment
+threads) and returns two things: a **maintenance health score** and a short
+briefing that justifies it. The score makes the answer scannable; the briefing
+makes it checkable.
+
+**What the score does and does not claim.** It measures *maintenance*: whether
+issues get resolved, whether the backlog is being worked, whether reporters get
+replies. It cannot see the source, so it is not a judgement of code quality. A
+dormant project with well-written code and a quiet tracker scores badly here,
+and that is the correct answer to the question being asked.
 
 "Trustworthy" is a hard requirement, not a nice-to-have: the summary must be
-anchored to real issue numbers and must not invent problems. That requirement is
-what justifies the verification stage below.
+anchored to real issue numbers and must not invent problems, and the score must
+be reproducible. That requirement is what justifies both the verification stage
+and the decision to compute the score in code rather than with a model.
 
 ---
 
@@ -52,8 +63,10 @@ graph LR
     L2 --> CC
     CC -->|problems, max 2 passes| L1
     CC -->|problems, max 2 passes| L2
-    CC -->|clean| CO[LLM 4: Composer]
-    CO --> OUT[HTML + Markdown, streamed via SSE]
+    CC -->|clean| HS[Health scorer: deterministic, no LLM]
+    GH -->|repo-wide counts| HS
+    HS -->|score + component breakdown| CO[LLM 4: Composer]
+    CO --> OUT[Score + briefing, HTML & Markdown, streamed via SSE]
     CO --> ST[(Cloudflare KV cache)]
 ```
 
@@ -70,6 +83,7 @@ graph LR
 | **LLM 2, comment threads** | **Parallel Fan-Out** (runs concurrently with LLM 1) | LLM step, bounded task | Mechanical extraction: summarize each issue's comment thread. Same profile as LLM 1; running the two in parallel cuts wall-clock time (latency = the slower branch, not the sum). |
 | **LLM 3, Coherence Checker** | **Evaluator** half of an **Evaluator-Optimizer loop** | LLM step, judgement task | Checks the LLM 1/LLM 2 digests against the source for hallucinations or incoherence. Emits a list of flagged issue numbers. If non-empty, the flagged issues (only those) go back to LLM 1/LLM 2 for a re-summary. **Bounded at 2 passes** to prevent an infinite loop; after that, the best current digest is accepted (graceful degradation). |
 | **LLM 4, Composer** | Synthesis / final generation | LLM step, judgement task | Takes the verified per-issue digests and produces the reader-facing briefing: themes, "needs attention", "open questions", each anchored to issue numbers. This is the output the user actually reads. |
+| **Health scorer** | Deterministic scoring node | No, plain code | Turns repo-wide counts and the sampled issues into a 0 to 100 maintenance score with a per-component breakdown. Runs after verification and before the composer. No model involved, so the same repo always scores the same and every point is traceable to a number. |
 | **Storage (KV)** | State persistence | No | Writes the composed result + per-issue digests + fetch metadata to Cloudflare KV, 7-day TTL, so the next run can take the warm path. |
 
 Naming honestly: only the **Router** (routing) and the **Coherence Checker**
@@ -93,6 +107,7 @@ The state that flows through the pipeline (and what persists to KV):
 | `commentDigests` | `Digest[]` | LLM 2 | LLM 3, LLM 4 |
 | `flagged` | `issueNumber[]` | LLM 3 | loop back to LLM 1/2 |
 | `passCount` | `int` | loop | loop guard (cap = 2) |
+| `health` | `HealthScore` | Health scorer | LLM 4, browser, KV |
 | `result` | `{ html, md }` | LLM 4 | browser, KV |
 
 `Issue` = `{ number, title, body, comments[], updatedAt, state }`.
@@ -107,8 +122,10 @@ The state that flows through the pipeline (and what persists to KV):
 2. Scout fetches issues + comments via GraphQL.
 3. LLM 1 and LLM 2 summarize in parallel.
 4. LLM 3 checks coherence; flagged issues loop back (≤2 passes).
-5. LLM 4 composes the briefing.
-6. Result streamed to browser (SSE) and written to KV.
+5. The health scorer computes the score in code from repo-wide counts and the
+   verified digests.
+6. LLM 4 composes the briefing, receiving the score as fixed input to explain.
+7. Result streamed to browser (SSE) and written to KV.
 
 **Warm path (repo cached):**
 1. Router finds a KV entry → `path = warm`.
@@ -204,6 +221,43 @@ model calls.
 
 - **Change-detection cache (KV, 7-day TTL).** Re-summarize only what moved;
   drop digests for closed issues. Without this, every run pays full price.
+
+- **The health score is computed in code, not by a model.** The score is the
+  most quotable number the tool produces, so it must be auditable: every point
+  traces to a named component with a stated basis. The scoring function is
+  pure, so identical inputs always give an identical score. 90 of the 100
+  points come from repo-wide counts and timestamps and are stable run to run;
+  the remaining 10 (severity load) reuse LLM 1's judgement, so a cold run can
+  land a point or two from the last. A cached result is byte-identical. That
+  residual variance is bounded and visible, which is the difference between
+  reusing model work inside an auditable function and letting a model invent
+  the number outright. LLM 4 receives the score and the
+  breakdown and is instructed to reproduce them exactly and explain them; it
+  never derives the number. This is the §2 principle applied where it matters
+  most, and it is the reason a model-assigned score was rejected: an
+  unreproducible number that no one can audit is worse than no number.
+
+- **The score uses ratios and recency, never raw issue counts.** Counting open
+  issues measures adoption, not health, and would rank repositories backwards.
+  Measured on real data while designing this:
+
+  | Repo | Open | Closed | Closed in 90d | Last push | Score |
+  | --- | --- | --- | --- | --- | --- |
+  | `developit/mitt` | 16 | 99 | 0 | 736 days ago | **47 (D)** |
+  | `colinhacks/zod` | 56 | 3,096 | 117 | same day | **97 (A)** |
+
+  By issue count `mitt` looks like the healthier project. It is dormant: it has
+  closed nothing in three months and 13 of its 16 open issues have been
+  untouched for over a year. The six components are resolution ratio (25),
+  backlog burndown (25), freshness of open issues (15), reply rate (15),
+  repository upkeep (10) and severity load (10). The last one reuses the
+  severities LLM 1 already produces, so it costs no extra model calls.
+
+- **The score ships with its own caveats.** Small trackers get a warning that
+  the ratios are not statistically meaningful, sampled components say so when
+  the tracker exceeds the 100-issue sample, and every result states that it
+  measures maintenance rather than code quality. A score that hides its
+  sampling frame invites exactly the misreading the tool exists to prevent.
 
 - **Issue references are links, and cost nothing to store.** Every `#1234` in
   the briefing is rendered as a link to the issue on GitHub. The URL is derived

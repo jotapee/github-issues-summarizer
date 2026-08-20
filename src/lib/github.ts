@@ -1,6 +1,8 @@
 import type { Issue, RepoMeta, RepoRef, RepoSnapshot } from './types';
 
 export const MAX_ISSUES = 100;
+/** Trailing window used for the recent-throughput health signals. */
+export const HEALTH_WINDOW_DAYS = 90;
 export const COMMENTS_PER_ISSUE = 20;
 /** GraphQL page size. MAX_ISSUES / PAGE_SIZE = requests per repo. */
 const PAGE_SIZE = 50;
@@ -23,11 +25,14 @@ export class GitHubError extends Error {
 }
 
 const ISSUES_QUERY = `
-query Issues($owner: String!, $name: String!, $first: Int!, $cursor: String, $since: DateTime) {
+query Issues($owner: String!, $name: String!, $first: Int!, $cursor: String, $since: DateTime, $window: DateTime!) {
   repository(owner: $owner, name: $name) {
     description
     stargazerCount
+    pushedAt
     primaryLanguage { name }
+    closedIssues: issues(states: CLOSED) { totalCount }
+    closedInWindow: issues(states: CLOSED, filterBy: { since: $window }) { totalCount }
     issues(
       states: OPEN
       first: $first
@@ -125,7 +130,10 @@ async function gql(token: string, variables: Record<string, unknown>) {
   return payload.data.repository as unknown as {
     description: string | null;
     stargazerCount: number;
+    pushedAt: string;
     primaryLanguage: { name: string } | null;
+    closedIssues: { totalCount: number };
+    closedInWindow: { totalCount: number };
     issues: {
       totalCount: number;
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
@@ -145,6 +153,9 @@ export async function fetchRepoSnapshot(
   options: { since?: string; limit?: number } = {},
 ): Promise<RepoSnapshot> {
   const limit = options.limit ?? MAX_ISSUES;
+  const windowStart = new Date(
+    Date.now() - HEALTH_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
   const issues: Issue[] = [];
   let cursor: string | null = null;
   let meta: RepoMeta | null = null;
@@ -156,6 +167,7 @@ export async function fetchRepoSnapshot(
       first: Math.min(PAGE_SIZE, limit - issues.length),
       cursor,
       since: options.since ?? null,
+      window: windowStart,
     });
 
     // The Exit branch of the diagram: no such repo, stop the pipeline.
@@ -165,7 +177,11 @@ export async function fetchRepoSnapshot(
       description: repository.description,
       stars: repository.stargazerCount,
       language: repository.primaryLanguage?.name ?? null,
+      pushedAt: repository.pushedAt,
       openIssueCount: repository.issues.totalCount,
+      closedIssueCount: repository.closedIssues.totalCount,
+      closedInWindow: repository.closedInWindow.totalCount,
+      windowDays: HEALTH_WINDOW_DAYS,
     };
 
     issues.push(...repository.issues.nodes.map(toIssue));
@@ -177,7 +193,16 @@ export async function fetchRepoSnapshot(
 
   return {
     ref,
-    meta: meta ?? { description: null, stars: 0, language: null, openIssueCount: 0 },
+    meta: meta ?? {
+      description: null,
+      stars: 0,
+      language: null,
+      pushedAt: new Date(0).toISOString(),
+      openIssueCount: 0,
+      closedIssueCount: 0,
+      closedInWindow: 0,
+      windowDays: HEALTH_WINDOW_DAYS,
+    },
     issues: issues.slice(0, limit),
     fetchedAt: new Date().toISOString(),
   };

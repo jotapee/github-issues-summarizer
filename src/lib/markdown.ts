@@ -96,3 +96,16 @@ export function linkIssueRefs(
     })
     .join('');
 }
+
+/**
+ * Removes em dashes from generated prose.
+ *
+ * The composer prompt asks the model not to use them, but a prompt is a
+ * request, not a guarantee: models emit them anyway. House style forbids them,
+ * so the rule is enforced here where it cannot be ignored. Surrounding
+ * whitespace is absorbed so "activity\u2014no changes" and "activity \u2014 no
+ * changes" both become "activity, no changes".
+ */
+export function stripEmDashes(text: string): string {
+  return text.replace(/\s*[\u2014\u2015]\s*/g, ', ');
+}

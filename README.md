@@ -1,8 +1,14 @@
 # GitHub Issues Summarizer
 
-Paste a public GitHub repository URL and get a short, source-anchored briefing
-on what its open issue tracker actually says: the dominant themes, what needs
-attention, and what nobody has answered yet.
+Paste a public GitHub repository URL and find out whether anyone is actually
+looking after it. You get a **maintenance health score** out of 100 and a
+short, source-anchored briefing that justifies it: the dominant themes, what
+needs attention, and what nobody has answered yet.
+
+The score measures *maintenance*, not code quality. An issue tracker shows
+whether maintainers respond and resolve; it cannot see the source. A dormant
+project with excellent code and a quiet tracker scores badly here, which is the
+correct answer to "is this dependency being looked after".
 
 This is a worked example of **multi-stage LLM orchestration**. The interesting
 part is not the summarising, it is the control flow around it: a deterministic
@@ -21,6 +27,7 @@ care about the "why".
 | Parallel fan-out of two independent LLM stages | [`l1-issues.ts`](src/lib/llm/l1-issues.ts), [`l2-comments.ts`](src/lib/llm/l2-comments.ts) |
 | Evaluator/optimizer loop, bounded at 2 passes | [`l3-coherence.ts`](src/lib/llm/l3-coherence.ts) |
 | Model routing by task type, with prices attached | [`models.ts`](src/lib/llm/models.ts) |
+| Deterministic scoring, with the model explaining rather than deciding | [`health.ts`](src/lib/health.ts) |
 | Fault isolation so one bad batch cannot abort a run | [`client.ts`](src/lib/llm/client.ts) |
 | Change-detection cache for cheap repeat runs | [`updater.ts`](src/lib/updater.ts) |
 | Treating model output as untrusted input | [`markdown.ts`](src/lib/markdown.ts) |
@@ -97,6 +104,38 @@ around 1,850 hidden reasoning tokens on a 180-token extraction, billed as
 output. `gpt-4.1-nano` was tried and rejected for both jobs: as a verifier it
 caught 0 of 4 planted defects, and as an extractor it silently dropped 3 to 4
 of 56 issues. DESIGN.md section 7 records the full method.
+
+### The health score
+
+Computed in [`src/lib/health.ts`](src/lib/health.ts) as ordinary code, never by
+a model. Every point traces to a named component with a stated basis, and LLM 4
+receives the score and its breakdown to explain, not to derive.
+
+The function is pure, so identical inputs always give an identical score. 90 of
+the 100 points come from repo-wide counts and timestamps and are stable between
+runs; the severity component reuses LLM 1's judgement, so a cold run can land a
+point or two from the last. Cached results are byte-identical.
+
+| Component | Max | Measures |
+| --- | --- | --- |
+| Issues get resolved | 25 | Closed share of every issue ever opened |
+| Backlog is being worked | 25 | Issues closed in the last 90 days against the open backlog |
+| Open issues are not abandoned | 15 | Share of sampled open issues touched within a year |
+| Reporters get a reply | 15 | Share of sampled open issues with at least one reply |
+| Project is still active | 10 | Recency of the last push |
+| Backlog is not dominated by serious bugs | 10 | High-severity share, reusing the LLM 1 severities |
+
+**Ratios and recency, never raw counts.** Counting open issues measures
+adoption, not health. Real numbers from two repos:
+
+| Repo | Open | Closed | Closed in 90d | Last push | Score |
+| --- | --- | --- | --- | --- | --- |
+| `developit/mitt` | 16 | 99 | 0 | 736 days ago | **47 (D)** |
+| `colinhacks/zod` | 56 | 3,096 | 117 | same day | **97 (A)** |
+
+By issue count `mitt` looks healthier. It is dormant. Every score ships with
+its own caveats, including the sampling frame when a tracker exceeds the
+100-issue sample.
 
 ### Scope and cost control
 
