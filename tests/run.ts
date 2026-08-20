@@ -6,7 +6,13 @@
  * exercised here, because those need live credentials and cost money.
  */
 import { mintToken, verifyToken } from '../src/lib/auth.ts';
-import { linkIssueRefs, renderMarkdown, stripEmDashes } from '../src/lib/markdown.ts';
+import {
+  dedupeThemeIssues,
+  findNonSubjectThemes,
+  linkIssueRefs,
+  renderMarkdown,
+  stripEmDashes,
+} from '../src/lib/markdown.ts';
 import { parseRepoInput } from '../src/lib/repo-url.ts';
 import { batch, runBatches } from '../src/lib/llm/batching.ts';
 import { gradeFor, scoreHealth } from '../src/lib/health.ts';
@@ -209,6 +215,55 @@ group('issue reference linking');
   ok('renders as an anchor', html.includes(`href="${link(112)}"`) && html.includes('rel="noopener noreferrer nofollow"'), html);
 }
 
+// ------------------------------------------------------- theme partition
+group('theme deduplication');
+{
+  const doc = [
+    '## Verdict', 'Fine.', '',
+    '## Main themes', '',
+    '### TypeScript types', 'Prose about types.', 'Issues: #10, #11, #12', '',
+    '### Vue integration', 'Prose about Vue.', 'Issues: #12, #13', '',
+    '### Docs', 'Prose about docs.', 'Issues: #10', '',
+    '## Needs attention', '- **#12**: still broken.', '',
+  ].join('\n');
+
+  const { markdown, removed } = dedupeThemeIssues(doc);
+  ok('first theme keeps the issue', markdown.includes('Issues: #10, #11, #12'), markdown);
+  ok('later duplicate is dropped', markdown.includes('Issues: #13'), markdown);
+  ok('reports what it removed', removed.length === 2, removed);
+  ok('names the theme it removed from',
+    removed.some((r) => r.number === 12 && r.theme === 'Vue integration')
+    && removed.some((r) => r.number === 10 && r.theme === 'Docs'), removed);
+  ok('theme emptied of issues loses its list line',
+    !/Issues:\s*$/m.test(markdown) && markdown.includes('Prose about docs.'), markdown);
+  ok('callout sections are untouched',
+    markdown.includes('- **#12**: still broken.'), markdown);
+
+  const counts = (markdown.slice(markdown.indexOf('## Main themes'), markdown.indexOf('## Needs attention')).match(/#12/g) ?? []).length;
+  ok('duplicate appears exactly once across themes', counts === 1, counts);
+
+  const clean = ['## Main themes', '### A', 'Issues: #1, #2', '### B', 'Issues: #3'].join('\n');
+  ok('clean input is unchanged',
+    dedupeThemeIssues(clean).markdown === clean && dedupeThemeIssues(clean).removed.length === 0);
+  ok('document without themes is a no-op',
+    dedupeThemeIssues('## TL;DR\nnothing here').removed.length === 0);
+}
+
+// ------------------------------------------------- non-subject theme names
+group('non-subject theme detection');
+{
+  const doc = (names: string[]) =>
+    ['## Main themes', ...names.flatMap((n) => [`### ${n}`, 'Issues: #1'])].join('\n');
+  ok('flags a severity theme',
+    findNonSubjectThemes(doc(['High-Severity Bugs', 'TypeScript types'])).join() === 'High-Severity Bugs');
+  ok('flags status themes',
+    findNonSubjectThemes(doc(['Blocked', 'Stale items'])).length === 2);
+  ok('leaves subject themes alone',
+    findNonSubjectThemes(doc(['TypeScript types', 'Vue integration', 'Documentation'])).length === 0);
+  ok('does not scan other sections',
+    findNonSubjectThemes('## Needs attention\n### Critical\nIssues: #1').length === 0);
+}
+
 // --------------------------------------------------------- house style
 group('em dash enforcement');
 {
@@ -292,6 +347,32 @@ group('maintenance health score');
   ok('small sample is flagged', empty.caveats.some((c) => c.includes('not statistically meaningful')), empty.caveats);
   ok('always caveats that it is not code quality',
     healthy.caveats.some((c) => c.includes('quality of the source code')), healthy.caveats);
+
+  // Regression: freshness/reply-rate once divided by issues read while
+  // severity divided by issues summarised, so a header saying "100 read" sat
+  // next to a basis saying "of 99 summarised".
+  {
+    const issues10 = mkIssues(10);
+    const digests10 = mkDigests(10).map((d, i) =>
+      i < 2 ? { ...d, failed: true, failureReason: 'test' } : d,
+    ) as Parameters<typeof scoreHealth>[2];
+    const h = scoreHealth(meta({ openIssueCount: 10 }), issues10, digests10, NOW);
+
+    ok('analysed excludes failed digests', h.analysed === 8, h.analysed);
+    ok('unavailable counts the failures', h.unavailable === 2, h.unavailable);
+
+    const sampleBased = h.components.filter((c) =>
+      ['freshness', 'responsiveness', 'severity'].includes(c.key),
+    );
+    const denominators = sampleBased.map((c) => {
+      const m = c.detail.match(/of (?:the )?(\d+) analysed/);
+      return m ? Number(m[1]) : -1;
+    });
+    ok('every sample-based signal uses one denominator',
+      denominators.length === 3 && denominators.every((d) => d === h.analysed), { denominators, analysed: h.analysed });
+    ok('dropped issues are disclosed in the caveats',
+      h.caveats.some((c) => c.includes('could not be summarised')), h.caveats);
+  }
 
   const failedOnly = scoreHealth(meta(), mkIssues(2), [
     { number: 1, gist: '', theme: '', kind: 'other', severity: 'high', failed: true },

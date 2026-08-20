@@ -58,7 +58,7 @@ function coerce(raw: unknown, known: Set<number>): IssueDigest[] {
  * batch failed or because the model omitted it from the response. DESIGN.md
  * section 8: record the failure and continue.
  */
-function unavailable(issue: Issue): IssueDigest {
+function unavailable(issue: Issue, reason: string): IssueDigest {
   return {
     number: issue.number,
     gist: 'Summary unavailable: this issue could not be processed.',
@@ -66,6 +66,7 @@ function unavailable(issue: Issue): IssueDigest {
     kind: 'other',
     severity: 'medium',
     failed: true,
+    failureReason: reason,
   };
 }
 
@@ -107,7 +108,31 @@ export async function summariseIssues(
 
   // Fill gaps for failed batches and for issues the model silently skipped.
   const covered = new Set(results.map((d) => d.number));
-  const placeholders = issues.filter((i) => !covered.has(i.number)).map(unavailable);
+  const failedNumbers = new Set(failed.map((i) => i.number));
+  const missing = issues.filter((i) => !covered.has(i.number));
+
+  const placeholders = missing.map((issue) =>
+    unavailable(
+      issue,
+      failedNumbers.has(issue.number)
+        ? 'the batch call failed'
+        : 'the model omitted it from its response',
+    ),
+  );
+
+  if (missing.length) {
+    // A dropped issue must be traceable, not silently absent from the counts.
+    console.warn(
+      JSON.stringify({
+        digestGap: {
+          stage: 'issues',
+          dropped: missing.length,
+          of: issues.length,
+          issues: placeholders.map((d) => ({ number: d.number, reason: d.failureReason })),
+        },
+      }),
+    );
+  }
 
   return [...results, ...placeholders];
 }

@@ -1,4 +1,10 @@
-import { linkIssueRefs, renderMarkdown, stripEmDashes } from '../markdown';
+import {
+  dedupeThemeIssues,
+  findNonSubjectThemes,
+  linkIssueRefs,
+  renderMarkdown,
+  stripEmDashes,
+} from '../markdown';
 import type {
   CommentDigest,
   HealthScore,
@@ -15,26 +21,38 @@ const SYSTEM = `You are writing the assessment that a developer reads before dep
 
 You get a precomputed maintenance health score, per-issue digests and per-thread digests. Write Markdown with exactly these sections:
 
+The two opening blocks have strictly separate jobs. Verdict is about the *health of the maintenance*. TL;DR is about the *content of the tracker*. They must not share a sentence or make the same point twice. If one of them has little to say, make it shorter rather than borrowing from the other.
+
 ## Verdict
-Two or three sentences answering whether this project is actively maintained and what a newcomer is walking into. State the score and grade exactly as given. Then justify it from the component breakdown: name the two components that cost the most points and the one that scored best, in plain language. Never recompute or adjust the score, and never invent component numbers. If a caveat is supplied, work the most important one into the prose rather than listing it.
+Two or three sentences on maintenance health only. State the score and grade exactly as given, say whether the project is well looked after, and name the single biggest weakness using the component that lost the most points. Never recompute or adjust the score, and never invent component numbers. If a caveat is supplied, work the most important one into the prose rather than listing it.
+Write only about upkeep: resolution, backlog movement, responsiveness, activity. Do not describe what the issues are about, do not name themes, and do not mention specific issue numbers. That is the TL;DR's job.
 
 ## TL;DR
-Three to five sentences. What is the state of this issue tracker right now? Lead with the single most important thing. Name the dominant themes and say whether the tracker is healthy, backed up, or dominated by one problem. No bullet points here.
+Two or three sentences on what is actually happening in the tracker right now. Name the dominant themes and the single most pressing item. Do not restate the verdict, the score, the grade, or any judgement about how well maintained the project is. Assume the reader has just read the verdict and does not want it repeated. No bullet points here.
 
 ## Main themes
-Three to six themes, each a "### " heading with the theme name. Under each: two or three sentences synthesising the issues in it, then a line "Issues: #12, #34, #56" listing the relevant numbers. Order themes by how much of the tracker they account for.
+Four to six themes that genuinely partition the issues, each a "### " heading. Under each: two or three sentences synthesising the issues in it, then a line "Issues: #12, #34, #56" listing the relevant numbers. Order themes by how much of the tracker they account for.
+This section is a partition, not a set of tags. Build it like this: choose four to six subject areas, then walk the issue list once and drop each issue into the single area that fits it best. An issue you have already placed is used up and cannot appear again. It is correct to leave an issue out of the themes entirely if it fits nowhere; it is never correct to list it twice.
+
+These rules are strict:
+- An issue number appears at most once in this entire section. Before you finish, read back the "Issues:" lines and confirm no number occurs twice. If one does, delete it from the weaker theme.
+- Theme names describe a *subject area*: the part of the product, codebase or workflow the issues touch. Good names look like "TypeScript types", "CLI commands", "Vue integration", "Documentation", "Installation".
+- Severity, urgency, status and issue type are attributes, never themes. Do not create a theme called "High-severity bugs", "Critical issues", "Bug fixes", "Blocked", "Stale", "Needs attention" or anything similar. If several serious bugs share a subject, they belong in that subject's theme, and you say inside it that they are severe. Urgency is what the "Needs attention" section is for.
+- No theme may be a subset or a rewording of another. Never pair "Bugs" with "High-severity bugs", or "Features" with "CLI features".
+- Prefer fewer, cleaner categories to more overlapping ones. Four sharp themes beat six blurred ones.
 
 ## Needs attention
-A bulleted list of at most 8 issues that most warrant a human right now: high severity, blocked, or with an unanswered question. Format each as "- **#123**: one line on why it needs attention."
+A bulleted list of at most 8 issues that most warrant a human right now: high severity, blocked, or stalled. Format each as "- **#123**: one line on why it needs attention." These are cross-cutting callouts, so they may repeat issues that appear under a theme.
 
 ## Open questions
-A bulleted list of at most 6 unresolved questions drawn from the discussions. Omit this section entirely if there are none.
+A bulleted list of at most 6 unresolved questions drawn from the discussions. These may also repeat issues that appear under a theme, but an issue must not appear in both "Needs attention" and "Open questions": pick whichever single section fits it better. Omit this section entirely if there are none.
 
 Rules:
-- Every issue number you cite must appear in the digests you were given. Never invent one.
+- Every issue number you cite anywhere must be copied from the digest list you were given. Do not adjust, round or guess a number, and if you are not certain a number is in that list, leave it out. A wrong number is worse than no number, because the reader will follow it.
 - The health score, its grade and its component numbers are given to you as fact. Reproduce them exactly. Do not recalculate, round differently, or editorialise the number up or down.
 - The score measures maintenance activity in the issue tracker. Never describe it as a judgement of code quality.
 - Synthesise across issues; do not restate digests one by one.
+- Before answering, check your own output against these four things and fix any that fail: (1) no issue number appears twice in "Main themes"; (2) no theme is named after severity, urgency, status or issue type; (3) the Verdict and TL;DR share no point; (4) every number you cite came from the digest list.
 - Plain, direct prose. No filler, no "in conclusion", no hedging about being an AI.
 - Never use em dashes. Use commas, colons, or separate sentences instead.
 - Do not include a top-level "# " heading; the page adds its own.
@@ -77,13 +95,20 @@ function header(
     .map((c) => `| ${c.label} | ${c.earned} / ${c.max} | ${c.detail} |`)
     .join('\n');
 
+  // The header count must equal the denominator every signal divides by,
+  // otherwise the reader sees "read 100" alongside "14 of 99".
+  const readNote =
+    health.unavailable > 0
+      ? `analysed the ${health.analysed} most recently updated open issues of ${issueCount} read (${health.unavailable} could not be summarised)`
+      : `analysed the ${health.analysed} most recently updated open issues`;
+
   return `# ${ref.owner}/${ref.repo}
 
 ${meta.description ?? '_No repository description._'}
 
 **Maintenance health: ${health.score}/100 (${health.grade})**
 
-*${facts.join(' · ')} · read from the ${issueCount} most recently updated open issues on ${new Date().toISOString().slice(0, 10)}*
+*${facts.join(' · ')} · ${readNote} on ${new Date().toISOString().slice(0, 10)}*
 
 | Signal | Score | Basis |
 | --- | --- | --- |
@@ -120,6 +145,11 @@ export async function composeSummary(
     ...health.caveats.map((c) => `  ${c}`),
   ].join('\n');
 
+  // The subject areas LLM 1 already assigned. Offering them as a vocabulary
+  // steers the composer towards subject themes and away from inventing
+  // severity buckets like "High-severity bugs".
+  const vocabulary = [...new Set(usable.map((d) => d.theme))].filter(Boolean).sort();
+
   const raw = await callJson<{ markdown?: unknown }>({
     apiKey,
     stage: 'composer',
@@ -135,13 +165,34 @@ Open issues in tracker: ${meta.openIssueCount}. Closed all time: ${meta.closedIs
         : ''
     }${deltaNote}
 
+SUBJECT AREAS already assigned to these issues by the extraction stage. Build your themes from these, merging near-duplicates into one theme. Do not invent a theme that is not a subject area:
+${vocabulary.join(', ')}
+
 DIGESTS:
 ${renderInput(usable, commentDigests)}`,
     maxTokens: 4000,
     temperature: 0.4,
   });
 
-  const body = stripEmDashes(String(raw.markdown ?? '').trim());
+  const cleaned = stripEmDashes(String(raw.markdown ?? '').trim());
+  // The prompt asks for a partition; this makes it certain.
+  const { markdown: body, removed } = dedupeThemeIssues(cleaned);
+  const nonSubject = findNonSubjectThemes(body);
+  if (nonSubject.length) {
+    // Reported, not rewritten. See findNonSubjectThemes for why.
+    console.warn(JSON.stringify({ nonSubjectThemes: nonSubject }));
+  }
+
+  if (removed.length) {
+    console.warn(
+      JSON.stringify({
+        themeOverlap: {
+          removed: removed.length,
+          entries: removed.map((r) => `#${r.number} from "${r.theme}"`),
+        },
+      }),
+    );
+  }
   if (!body) throw new Error('The composer returned an empty summary.');
   if (!usable.length) throw new Error('No issues could be summarised.');
 

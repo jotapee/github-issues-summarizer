@@ -6,7 +6,8 @@ import type { StoredResult } from './types';
 //   v2: `digests` renamed to `bodyDigests` (DESIGN.md section 5)
 //   v3: issue references in the summary are rendered as links
 //   v4: maintenance health score added to the record and the output
-const PREFIX = 'tldr:v4:';
+//   v5: single health denominator, and non-overlapping themes in the output
+const PREFIX = 'tldr:v5:';
 /** Cached summaries expire after a week even if nobody refreshes them. */
 const TTL_SECONDS = 60 * 60 * 24 * 7;
 

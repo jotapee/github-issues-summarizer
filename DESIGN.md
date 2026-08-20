@@ -259,6 +259,36 @@ model calls.
   measures maintenance rather than code quality. A score that hides its
   sampling frame invites exactly the misreading the tool exists to prevent.
 
+- **The composer's output contract is enforced where each rule can be.** The
+  briefing must partition its issues (each number under exactly one theme),
+  keep the Verdict about maintenance and the TL;DR about tracker content, and
+  cite only real issue numbers. Rules that are mechanical are enforced
+  mechanically after the model returns: duplicate issue numbers across themes
+  are removed, keeping the first theme to claim one. Rules that need judgement
+  stay in the prompt.
+
+  Measured across three repositories, the prompt alone got the partition right
+  about two thirds of the time, so the deterministic pass exists to close the
+  gap rather than to replace the instruction. One rule resists both approaches:
+  the composer occasionally names a theme after severity ("High-Severity
+  Bugs") even when it is given a clean subject vocabulary from LLM 1, told to
+  build themes from it, and told not to use that exact name. Those themes are
+  **detected and logged, not rewritten**, because choosing a replacement name
+  is a judgement call and renaming a heading the surrounding prose refers to
+  would trade one incoherence for another. This is the same lesson as the em
+  dash rule: a prompt is a request, and anything that must be true belongs in
+  code.
+
+- **One denominator for every sampled health signal.** Freshness, reply rate
+  and severity load all divide by the same number: issues that produced a
+  usable digest. They previously did not, so a header reading "read from the
+  100 most recently updated open issues" could sit beside a basis reading "14
+  of 99 summarised issues". The header now reports that same count, and any
+  issue read but not summarised is disclosed in the caveats and logged with a
+  reason. Note that pull requests cannot cause this: GitHub's GraphQL
+  `Repository.issues` connection returns issues only, unlike the REST
+  `/issues` endpoint which includes them.
+
 - **Issue references are links, and cost nothing to store.** Every `#1234` in
   the briefing is rendered as a link to the issue on GitHub. The URL is derived
   at compose time from the repo reference already on the record plus the issue
@@ -291,7 +321,13 @@ model calls.
 - **GitHub rate limit / API error** → surface the error; the operator token
   keeps the normal case well under limits.
 - **A single issue fails to summarize** → record the failure for that issue and
-  continue; one bad issue does not abort the batch.
+  continue; one bad issue does not abort the batch. Batches run under
+  `Promise.allSettled`, so a rejected batch is isolated: its issues get a
+  `failed` digest carrying the reason (the batch call failed, or the model
+  omitted it from its response), the gap is logged, and the run proceeds. If
+  *every* batch fails that is systemic and is raised instead of yielding an
+  empty briefing. A failed issue is excluded from every health signal and from
+  the composed output, and the exclusion is stated in the caveats.
 - **Coherence never converges within 2 passes** → accept the best digest
   (graceful degradation), never loop forever.
 - **No KV configured** → the app still runs; it simply never caches and always

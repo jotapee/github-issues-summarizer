@@ -61,6 +61,8 @@ export interface IssueDigest {
    * exclude it from verification and from the composed output.
    */
   failed?: boolean;
+  /** Why it could not be summarised. Present whenever `failed` is set. */
+  failureReason?: string;
 }
 
 /** LLM 2 output, one entry per issue that has comments. */
@@ -109,6 +111,10 @@ export interface HealthScore {
   /** 0 to 100. */
   score: number;
   grade: string;
+  /** Issues that produced a usable digest. Every signal below divides by this. */
+  analysed: number;
+  /** Issues read but not summarised, so excluded from every signal. */
+  unavailable: number;
   components: HealthComponent[];
   /** Limits the reader needs in order to interpret the number honestly. */
   caveats: string[];

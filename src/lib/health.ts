@@ -90,7 +90,16 @@ export function scoreHealth(
   now: number = Date.now(),
 ): HealthScore {
   const totalIssues = meta.openIssueCount + meta.closedIssueCount;
-  const sampled = issues.length;
+
+  // One canonical sample for every sample-based signal. An issue that failed
+  // to summarise cannot be judged on severity, so it is excluded here rather
+  // than counted by some components and not others, which is how the header
+  // and the severity basis came to disagree.
+  const usable = digests.filter((d) => !d.failed);
+  const analysedNumbers = new Set(usable.map((d) => d.number));
+  const sample = issues.filter((i) => analysedNumbers.has(i.number));
+  const sampled = sample.length;
+  const unavailable = issues.length - sampled;
 
   // 1. Do issues eventually get resolved at all? Repo-wide, lifetime.
   const resolutionRatio = totalIssues > 0 ? meta.closedIssueCount / totalIssues : 0;
@@ -104,11 +113,11 @@ export function scoreHealth(
         : 0;
 
   // 3. How much of the open backlog has simply been abandoned?
-  const stale = issues.filter((i) => daysSince(i.updatedAt, now) > STALE_DAYS).length;
+  const stale = sample.filter((i) => daysSince(i.updatedAt, now) > STALE_DAYS).length;
   const freshRatio = sampled > 0 ? 1 - stale / sampled : 0;
 
   // 4. Do reporters get any reply at all?
-  const answered = issues.filter((i) => i.commentCount > 0).length;
+  const answered = sample.filter((i) => i.commentCount > 0).length;
   const answeredRatio = sampled > 0 ? answered / sampled : 0;
 
   // 5. Is the project itself still being worked on?
@@ -116,9 +125,8 @@ export function scoreHealth(
   const upkeepRatio = pushAge <= 30 ? 1 : pushAge >= 365 ? 0 : 1 - (pushAge - 30) / 335;
 
   // 6. How much of the open backlog is serious? Reuses the LLM 1 severities.
-  const usable = digests.filter((d) => !d.failed);
   const severe = usable.filter((d) => d.severity === 'high' && d.kind === 'bug').length;
-  const severeRatio = usable.length > 0 ? severe / usable.length : 0;
+  const severeRatio = sampled > 0 ? severe / sampled : 0;
 
   const components: HealthComponent[] = [
     component(
@@ -141,8 +149,8 @@ export function scoreHealth(
       freshRatio,
       15,
       sampled > 0
-        ? `${stale} of the ${sampled} sampled open issues have had no activity in over a year.`
-        : 'No open issues sampled.',
+        ? `${stale} of the ${sampled} analysed issues have had no activity in over a year.`
+        : 'No open issues analysed.',
     ),
     component(
       'responsiveness',
@@ -150,8 +158,8 @@ export function scoreHealth(
       answeredRatio,
       15,
       sampled > 0
-        ? `${sampled - answered} of the ${sampled} sampled open issues have no replies at all.`
-        : 'No open issues sampled.',
+        ? `${sampled - answered} of the ${sampled} analysed issues have no replies at all.`
+        : 'No open issues analysed.',
     ),
     component(
       'upkeep',
@@ -167,9 +175,9 @@ export function scoreHealth(
       'Backlog is not dominated by serious bugs',
       1 - severeRatio,
       10,
-      usable.length > 0
-        ? `${severe} of ${usable.length} summarised issues are high-severity bugs (${pct(severeRatio)}).`
-        : 'No issues summarised.',
+      sampled > 0
+        ? `${severe} of the ${sampled} analysed issues are high-severity bugs (${pct(severeRatio)}).`
+        : 'No issues analysed.',
     ),
   ];
 
@@ -181,14 +189,19 @@ export function scoreHealth(
       `Only ${totalIssues} issues have ever been opened, so these ratios are not statistically meaningful.`,
     );
   }
-  if (meta.openIssueCount > sampled) {
+  if (meta.openIssueCount > issues.length) {
     caveats.push(
-      `Sampled the ${sampled} most recently updated of ${meta.openIssueCount} open issues, so staleness and reply rate describe that sample.`,
+      `Analysed the ${sampled} most recently updated of ${meta.openIssueCount} open issues, so staleness, reply rate and severity describe that sample.`,
+    );
+  }
+  if (unavailable > 0) {
+    caveats.push(
+      `${unavailable} of the ${issues.length} issues read could not be summarised and are excluded from every signal above.`,
     );
   }
   caveats.push(
     'Measures maintenance activity in the issue tracker. It says nothing about the quality of the source code itself.',
   );
 
-  return { score, grade: gradeFor(score), components, caveats };
+  return { score, grade: gradeFor(score), analysed: sampled, unavailable, components, caveats };
 }
