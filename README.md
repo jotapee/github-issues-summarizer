@@ -67,6 +67,9 @@ POST /api/tldr  ──▶  Router          src/lib/pipeline.ts
                   problems?  ───────┘  re-summarises only the flagged issues
                        │                (max 2 passes)
                        ▼
+                  Health scorer, no LLM      src/lib/health.ts
+                       │  score + component breakdown, computed in code
+                       ▼
                   LLM 4 Composer            src/lib/llm/l4-composer.ts
                        │
                        ├──▶ Markdown + HTML to the browser (streamed via SSE)
@@ -92,14 +95,21 @@ Every stage is assigned in one place,
 [`src/lib/llm/models.ts`](src/lib/llm/models.ts), which also carries each
 model's price so a run can report what it cost.
 
-Measured cost per cold run, before and after moving the coherence checker off
-`gpt-4o`:
+Measured cost per cold run as the pipeline stands today:
 
-| Repo | Open issues | Before | After | Change |
-| --- | --- | --- | --- | --- |
-| `lukeed/clsx` | 8 | $0.0147 | $0.0096 | -35% |
-| `developit/mitt` | 16 | $0.0241 | $0.0142 | -41% |
-| `colinhacks/zod` | 56 | $0.1044 | $0.0341 | -67% |
+| Repo | Open issues | Cost per cold run | Composer share |
+| --- | --- | --- | --- |
+| `lukeed/clsx` | 8 | $0.0137 | 78% |
+| `developit/mitt` | 16 | $0.0154 | 78% |
+| `colinhacks/zod` | 56 | $0.0392 | 57% |
+
+A warm run on an unchanged repository is $0.00, since it makes no model calls.
+
+Moving the coherence checker off `gpt-4o` is what bought most of that. Measured
+in isolation at the time, with the prompt as it then stood, it took `zod` from
+$0.1044 to $0.0341, a 67% cut. Costs have since risen slightly because the
+composer prompt grew to carry the health breakdown and the subject vocabulary;
+the figures above are current and include that.
 
 Two results worth knowing before you copy this pattern. The extraction stages
 were never the cost driver: they are 10% to 30% of a run, while the verifier
@@ -141,6 +151,34 @@ adoption, not health. Real numbers from two repos:
 By issue count `mitt` looks healthier. It is dormant. Every score ships with
 its own caveats, including the sampling frame when a tracker exceeds the
 100-issue sample.
+
+### What the output guarantees
+
+The briefing has a contract, and each rule is enforced at the level it can be.
+Rules that are mechanical are enforced in code after the model returns; rules
+that need judgement stay in the prompt.
+
+| Rule | Enforced by | Where |
+| --- | --- | --- |
+| Each issue appears under exactly one theme | Code, after the model returns | `dedupeThemeIssues` |
+| Only real issue numbers become links | Code, filtered against the digests | `linkIssueRefs` |
+| No em dashes anywhere in the prose | Code | `stripEmDashes` |
+| Raw HTML from issue text cannot render | Code | `renderMarkdown` |
+| Every health signal shares one denominator | Code | `health.ts` |
+| Verdict covers maintenance, TL;DR covers the tracker | Prompt | `l4-composer.ts` |
+| Themes are subject areas, not severity buckets | Prompt, with violations logged | `findNonSubjectThemes` |
+
+The split is deliberate. Across three repositories the prompt alone got the
+theme partition right about two thirds of the time, which is why the
+deterministic pass exists. One rule resists both: the composer still names a
+theme after severity now and then, even when handed a clean subject vocabulary
+and told not to. Those are **detected and logged, not rewritten**, because
+picking a replacement name is a judgement call and renaming a heading the prose
+refers to would trade one incoherence for another.
+
+Issues that fail to summarise are recorded with a reason, logged, excluded from
+every signal and from the briefing, and disclosed in the score's caveats. They
+are never silently dropped from a count.
 
 ### Scope and cost control
 
@@ -199,9 +237,10 @@ never caches, so every request takes the full cold path.
 | Command | What it does |
 | --- | --- |
 | `npm run dev` | Next dev server, with local KV via Miniflare |
-| `npm test` | Sanitiser, URL parser, token and batch-isolation tests. No credentials needed |
+| `npm test` | 102 tests over the sanitiser, URL parser, API tokens, updater, batch isolation, issue linking, theme dedup, em dash rule and health scoring. No credentials needed |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | Next production build |
+| `npm start` | Serve the Next production build on Node |
 | `npm run preview` | Build for Workers and serve it on workerd locally |
 | `npm run deploy` | Build and deploy to Cloudflare |
 | `npm run cf-typegen` | Regenerate binding types from `wrangler.jsonc` |

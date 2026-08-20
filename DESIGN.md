@@ -111,8 +111,26 @@ The state that flows through the pipeline (and what persists to KV):
 | `health` | `HealthScore` | Health scorer | LLM 4, browser, KV |
 | `result` | `{ html, md }` | LLM 4 | browser, KV |
 
-`Issue` = `{ number, title, body, comments[], updatedAt, state }`.
-`Digest` = `{ issueNumber, summary }`.
+`Issue` = `{ number, title, body, url, author, labels[], createdAt, updatedAt,
+commentCount, comments[] }`.
+
+`Digest` is specialised per producer:
+- `IssueDigest` (LLM 1) = `{ number, gist, theme, kind, severity, failed?, failureReason? }`
+- `CommentDigest` (LLM 2) = `{ number, discussion, consensus, blockers[], openQuestions[], failed? }`
+
+`failed` marks an issue that could not be summarised, with `failureReason`
+recording why. The entry is kept so the failure is recorded rather than
+silently dropped, and excluded from verification, from every health signal and
+from the composed output (§8).
+
+`HealthScore` = `{ score, grade, analysed, unavailable, components[], caveats[] }`.
+`analysed` is the single denominator every sampled signal divides by (§7).
+
+The record is written under a versioned KV prefix, currently `tldr:v5:`. The
+version is bumped whenever the stored shape **or the rendered output** changes,
+so existing entries regenerate instead of serving a stale format. The second
+half of that rule is the one that is easy to forget: adding issue links and
+adding the health score each changed only the output, and each needed a bump.
 
 ---
 
@@ -160,14 +178,21 @@ model calls.
   | LLM 3, coherence checker | `gpt-4o-mini` | Matches `gpt-4o` at catching planted defects, at 1/17th the price |
   | LLM 4, composer | `gpt-4o` | The only output a human reads, and it runs once per cold run |
 
-  **Measured cost per cold run** (three repos, before and after moving LLM 3
-  off `gpt-4o`):
+  **Measured cost per cold run**, as the pipeline stands today:
 
-  | Repo | Open issues | Before | After | Change |
-  | --- | --- | --- | --- | --- |
-  | `lukeed/clsx` | 8 | $0.0147 | $0.0096 | -35% |
-  | `developit/mitt` | 16 | $0.0241 | $0.0142 | -41% |
-  | `colinhacks/zod` | 56 | $0.1044 | $0.0341 | -67% |
+  | Repo | Open issues | Cost per cold run | Composer share |
+  | --- | --- | --- | --- |
+  | `lukeed/clsx` | 8 | $0.0137 | 78% |
+  | `developit/mitt` | 16 | $0.0154 | 78% |
+  | `colinhacks/zod` | 56 | $0.0392 | 57% |
+
+  Moving LLM 3 off `gpt-4o` bought most of that. Measured in isolation at the
+  time, against the prompt as it then stood, it took `zod` from $0.1044 to
+  $0.0341. Costs have since risen slightly because the composer prompt grew to
+  carry the health breakdown and the subject vocabulary, so the figures above
+  are re-measured rather than carried forward. Anything that publishes a dollar
+  figure has to be re-measured when the prompts change, or it quietly becomes
+  fiction.
 
   Two findings worth recording, because both contradict the obvious guess:
 
@@ -341,7 +366,8 @@ model calls.
 | Variable | Notes |
 | --- | --- |
 | `GITHUB_TOKEN` | PAT with `public_repo` read scope. The **operator's** token, not the visitor's; visitors never authenticate. Required because the Scout uses GraphQL. |
-| `OPENAI_API_KEY` | Model access for LLM 1–4. |
+| `OPENAI_API_KEY` | Model access for LLM 1 to 4. |
+| `AUTH_SECRET` | Signing key for the short-lived tokens the page mints, which gate `/api/tldr` (§10). Never sent to the browser; rotating it invalidates every outstanding token. Without it the API returns 503, so it is required to run, not optional. |
 
 ---
 
@@ -396,12 +422,13 @@ specifically guards the path where raw HTML from an issue title could reach
 Cost is a design constraint, not an afterthought. Every cold run spends real
 money on model calls, and the site is public.
 
-**Where the money goes.** A cold run is roughly 8 to 20 model calls over up to
+**Where the money goes.** A cold run is roughly 9 to 17 model calls over up to
 100 issues. Only LLM 4, the composer, runs on the strong model; LLM 1, LLM 2 and
-LLM 3 all run on `gpt-4o-mini` (§7). Measured cost per cold run is $0.0096 for a
-small tracker (8 issues), $0.0142 for a medium one (16), and $0.0341 for a large
-one (56), of which the composer alone is 52% to 73%. A warm run on an unchanged
-repo is **zero** model calls, served from cache.
+LLM 3 all run on `gpt-4o-mini` (§7). Measured cost per cold run is $0.0137 for a
+small tracker (8 issues), $0.0154 for a medium one (16) and $0.0392 for a large
+one (56), of which the composer alone is 57% to 78%. That share is why the
+composer is the remaining cost lever. A warm run on an unchanged repo is
+**zero** model calls, served from cache.
 
 **The controls, and what each bounds:**
 
