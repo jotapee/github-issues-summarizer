@@ -20,7 +20,7 @@ care about the "why".
 | Routing (deterministic conditional edge) | [`pipeline.ts`](src/lib/pipeline.ts) |
 | Parallel fan-out of two independent LLM stages | [`l1-issues.ts`](src/lib/llm/l1-issues.ts), [`l2-comments.ts`](src/lib/llm/l2-comments.ts) |
 | Evaluator/optimizer loop, bounded at 2 passes | [`l3-coherence.ts`](src/lib/llm/l3-coherence.ts) |
-| Model routing by task type (cheap extraction, strong judgement) | [`client.ts`](src/lib/llm/client.ts) |
+| Model routing by task type, with prices attached | [`models.ts`](src/lib/llm/models.ts) |
 | Fault isolation so one bad batch cannot abort a run | [`client.ts`](src/lib/llm/client.ts) |
 | Change-detection cache for cheap repeat runs | [`updater.ts`](src/lib/updater.ts) |
 | Treating model output as untrusted input | [`markdown.ts`](src/lib/markdown.ts) |
@@ -72,10 +72,30 @@ routes by task type instead:
 | --- | --- | --- |
 | LLM 1, titles and bodies | `gpt-4o-mini` | High volume, mechanical extraction |
 | LLM 2, comment threads | `gpt-4o-mini` | Same profile |
-| LLM 3, coherence checker | `gpt-4o` | Needs judgement to avoid false flags |
-| LLM 4, composer | `gpt-4o` | The output a human actually reads |
+| LLM 3, coherence checker | `gpt-4o-mini` | Matches `gpt-4o` at catching planted defects, at 1/17th the price |
+| LLM 4, composer | `gpt-4o` | The only output a human reads, and it runs once per cold run |
 
-Both constants live in [`src/lib/llm/client.ts`](src/lib/llm/client.ts).
+Every stage is assigned in one place,
+[`src/lib/llm/models.ts`](src/lib/llm/models.ts), which also carries each
+model's price so a run can report what it cost.
+
+Measured cost per cold run, before and after moving the coherence checker off
+`gpt-4o`:
+
+| Repo | Open issues | Before | After | Change |
+| --- | --- | --- | --- | --- |
+| `lukeed/clsx` | 8 | $0.0147 | $0.0096 | -35% |
+| `developit/mitt` | 16 | $0.0241 | $0.0142 | -41% |
+| `colinhacks/zod` | 56 | $0.1044 | $0.0341 | -67% |
+
+Two results worth knowing before you copy this pattern. The extraction stages
+were never the cost driver: they are 10% to 30% of a run, while the verifier
+and composer are the rest. And newer or smaller does not mean cheaper.
+`gpt-5.4-mini` is five times dearer than `gpt-4o-mini`, and `gpt-5-nano` spends
+around 1,850 hidden reasoning tokens on a 180-token extraction, billed as
+output. `gpt-4.1-nano` was tried and rejected for both jobs: as a verifier it
+caught 0 of 4 planted defects, and as an extractor it silently dropped 3 to 4
+of 56 issues. DESIGN.md section 7 records the full method.
 
 ### Scope and cost control
 

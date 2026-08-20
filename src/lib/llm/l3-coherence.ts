@@ -1,5 +1,5 @@
 import type { CoherenceReport, CommentDigest, Issue, IssueDigest, UpdateDelta } from '../types';
-import { REASONING_MODEL, callJson } from './client';
+import { callJson } from './client';
 
 const SYSTEM = `You are a fact-checker sitting between two summarisation stages and a final composer.
 
@@ -50,7 +50,7 @@ export async function checkCoherence(
 
   const raw = await callJson<unknown>({
     apiKey,
-    model: REASONING_MODEL,
+    stage: 'coherence',
     system: SYSTEM,
     user: `GROUND TRUTH, open issues:
 ${renderGroundTruth(issues)}

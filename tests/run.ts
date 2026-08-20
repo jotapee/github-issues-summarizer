@@ -8,7 +8,7 @@
 import { mintToken, verifyToken } from '../src/lib/auth.ts';
 import { renderMarkdown } from '../src/lib/markdown.ts';
 import { parseRepoInput } from '../src/lib/repo-url.ts';
-import { batch, runBatches } from '../src/lib/llm/client.ts';
+import { batch, runBatches } from '../src/lib/llm/batching.ts';
 import { checkUpdates, mergeDigests, pruneClosed } from '../src/lib/updater.ts';
 import type { StoredResult } from '../src/lib/types.ts';
 

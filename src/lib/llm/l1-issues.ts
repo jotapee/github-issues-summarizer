@@ -1,5 +1,5 @@
 import type { Issue, IssueDigest } from '../types';
-import { SCOUT_MODEL, batch, callJson, runBatches } from './client';
+import { batch, callJson, runBatches } from './client';
 
 /** Issues per prompt. Keeps each request well inside the context window. */
 const BATCH_SIZE = 12;
@@ -89,7 +89,7 @@ export async function summariseIssues(
     const known = new Set(group.map((i) => i.number));
     const raw = await callJson<unknown>({
       apiKey,
-      model: SCOUT_MODEL,
+      stage: 'issues',
       system: SYSTEM,
       user: `Summarise these ${group.length} issues.${correction}\n\n${group.map(renderIssue).join('\n\n')}`,
       maxTokens: 2400,

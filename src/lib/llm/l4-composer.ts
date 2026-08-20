@@ -8,7 +8,7 @@ import type {
   Summary,
   UpdateDelta,
 } from '../types';
-import { REASONING_MODEL, callJson } from './client';
+import { callJson } from './client';
 
 const SYSTEM = `You are writing the TL;DR that a maintainer or a newcomer reads instead of scrolling the issue tracker.
 
@@ -89,7 +89,7 @@ export async function composeSummary(
 
   const raw = await callJson<{ markdown?: unknown }>({
     apiKey,
-    model: REASONING_MODEL,
+    stage: 'composer',
     system: SYSTEM,
     user: `Repository: ${ref.owner}/${ref.repo}
 ${meta.description ? `Description: ${meta.description}` : ''}

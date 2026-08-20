@@ -1,9 +1,9 @@
 import OpenAI from 'openai';
+import { type Stage, costOf, specFor } from './models';
 
-/** Cheap, high-throughput stages: the two scouts (LLM 1 and LLM 2). */
-export const SCOUT_MODEL = 'gpt-4o-mini';
-/** Judgement stages: the coherence checker (LLM 3) and composer (LLM 4). */
-export const REASONING_MODEL = 'gpt-4o';
+export { batch, runBatches, type BatchRun } from './batching';
+
+export { type Stage } from './models';
 
 export class LLMError extends Error {
   constructor(message: string) {
@@ -25,7 +25,8 @@ export function getClient(apiKey: string): OpenAI {
 
 interface JsonCallOptions {
   apiKey: string;
-  model: string;
+  /** Which pipeline stage is calling. The model is resolved from models.ts. */
+  stage: Stage;
   system: string;
   user: string;
   /** Composer output is long; scouts are short. */
@@ -39,22 +40,45 @@ interface JsonCallOptions {
  * caller validates the result itself.
  */
 export async function callJson<T>(options: JsonCallOptions): Promise<T> {
-  const { apiKey, model, system, user, maxTokens = 2000, temperature = 0.2 } = options;
+  const { apiKey, stage, system, user, maxTokens = 2000, temperature = 0.2 } = options;
+  const spec = specFor(stage);
   const openai = getClient(apiKey);
 
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const completion = await openai.chat.completions.create({
-        model,
-        temperature,
-        max_tokens: maxTokens,
+        model: spec.id,
+        // The reasoning-era families renamed the cap and some reject an
+        // explicit temperature, so both are driven by the model spec.
+        ...(spec.tokenCapField === 'max_tokens'
+          ? { max_tokens: maxTokens }
+          : { max_completion_tokens: maxTokens }),
+        ...(spec.supportsTemperature ? { temperature } : {}),
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
       });
+
+      const usage = completion.usage;
+      if (usage) {
+        // Emitted so a run's cost can be measured rather than estimated.
+        console.log(
+          JSON.stringify({
+            llmUsage: {
+              stage,
+              model: spec.id,
+              inputTokens: usage.prompt_tokens,
+              outputTokens: usage.completion_tokens,
+              usd: Number(
+                costOf(spec, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0).toFixed(6),
+              ),
+            },
+          }),
+        );
+      }
 
       const text = completion.choices[0]?.message?.content;
       if (!text) throw new LLMError('Model returned an empty response.');
@@ -69,49 +93,5 @@ export async function callJson<T>(options: JsonCallOptions): Promise<T> {
   }
 
   const message = lastError instanceof Error ? lastError.message : String(lastError);
-  throw new LLMError(`${model} call failed: ${message}`);
-}
-
-/** Splits work into batches so no single prompt gets unreasonably large. */
-export function batch<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
-}
-
-export interface BatchRun<TIn, TOut> {
-  results: TOut[];
-  /** Items belonging to batches whose model call failed outright. */
-  failed: TIn[];
-  firstError: unknown;
-}
-
-/**
- * Runs batches concurrently and isolates failures to the batch that caused
- * them. DESIGN.md section 8 requires that one bad issue must not abort the
- * run, so a rejected batch is recorded rather than propagated.
- *
- * Callers are expected to treat "every batch failed" as systemic (a bad API
- * key, for instance) and re-throw.
- */
-export async function runBatches<TIn, TOut>(
-  groups: TIn[][],
-  handler: (group: TIn[]) => Promise<TOut[]>,
-): Promise<BatchRun<TIn, TOut>> {
-  const settled = await Promise.allSettled(groups.map(handler));
-
-  const results: TOut[] = [];
-  const failed: TIn[] = [];
-  let firstError: unknown;
-
-  settled.forEach((outcome, index) => {
-    if (outcome.status === 'fulfilled') {
-      results.push(...outcome.value);
-      return;
-    }
-    failed.push(...groups[index]);
-    firstError ??= outcome.reason;
-  });
-
-  return { results, failed, firstError };
+  throw new LLMError(`${spec.id} call failed: ${message}`);
 }

@@ -1,5 +1,5 @@
 import type { CommentDigest, Issue } from '../types';
-import { SCOUT_MODEL, batch, callJson, runBatches } from './client';
+import { batch, callJson, runBatches } from './client';
 
 /** Comment threads are bulkier than bodies, so smaller batches than LLM 1. */
 const BATCH_SIZE = 6;
@@ -89,7 +89,7 @@ export async function summariseComments(
     const known = new Set(group.map((i) => i.number));
     const raw = await callJson<unknown>({
       apiKey,
-      model: SCOUT_MODEL,
+      stage: 'comments',
       system: SYSTEM,
       user: `Summarise these ${group.length} comment threads.${correction}\n\n${group.map(renderThread).join('\n\n')}`,
       maxTokens: 2400,
